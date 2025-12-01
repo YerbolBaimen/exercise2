@@ -54,6 +54,7 @@ if isinstance(date_range, tuple):
 else:
     start_date = end_date = date_range
 
+# District filter
 districts = sorted(df["DISTRICT"].dropna().unique().tolist())
 selected_districts = st.sidebar.multiselect(
     "Filter by district",
@@ -61,11 +62,41 @@ selected_districts = st.sidebar.multiselect(
     default=districts,
 )
 
+# UCR Part filter
+ucr_filter = st.sidebar.radio(
+    "Filter by UCR Part",
+    options=["All", "Part One only", "Part Two only"],
+    index=0,
+)
+
+# Shooting filter
+shooting_filter = st.sidebar.radio(
+    "Filter by shooting",
+    options=["All", "Shooting only", "Non-shooting only"],
+    index=0,
+)
+
+# Base mask: date range
 mask = (df["OCCURRED_ON_DATE"].dt.date >= start_date) & \
        (df["OCCURRED_ON_DATE"].dt.date <= end_date)
 
+# District mask
 if selected_districts:
     mask &= df["DISTRICT"].isin(selected_districts)
+
+# UCR Part mask
+if ucr_filter == "Part One only":
+    mask &= df["UCR_PART"] == "Part One"
+elif ucr_filter == "Part Two only":
+    mask &= df["UCR_PART"] == "Part Two"
+# "All" -> no extra mask
+
+# Shooting mask
+if shooting_filter == "Shooting only":
+    mask &= df["SHOOTING"].notna() & (df["SHOOTING"] != "")
+elif shooting_filter == "Non-shooting only":
+    mask &= df["SHOOTING"].isna() | (df["SHOOTING"] == "")
+# "All" -> no extra mask
 
 filtered = df.loc[mask].copy()
 
@@ -121,31 +152,50 @@ dist_counts = (
 st.bar_chart(dist_counts)
 
 # -----------------------------------------------------------
-# 3) Top 10 offense groups – PIE CHART (Altair)
+# 3) Top offense groups – PIE CHART (top 10 + Others)
 # -----------------------------------------------------------
-st.subheader("🔟 Top 10 Offense Groups (Pie Chart)")
+st.subheader("🔟 Offense Groups (Top 10 + Others)")
 
-offense_counts = (
+offense_counts_full = (
     filtered
     .groupby("OFFENSE_CODE_GROUP")
     .size()
     .reset_index(name="count")
     .sort_values("count", ascending=False)
-    .head(10)
 )
 
-pie_chart = (
-    alt.Chart(offense_counts)
-    .mark_arc()
-    .encode(
-        theta="count:Q",
-        color=alt.Color("OFFENSE_CODE_GROUP:N", legend=alt.Legend(title="Offense Group")),
-        tooltip=["OFFENSE_CODE_GROUP:N", "count:Q"]
+if offense_counts_full.empty:
+    st.info("No offense data available for the selected filters.")
+else:
+    # top 10
+    top10 = offense_counts_full.head(10).copy()
+    top10_total = top10["count"].sum()
+    overall_total = offense_counts_full["count"].sum()
+    others_count = overall_total - top10_total
+
+    if others_count > 0:
+        others_row = pd.DataFrame(
+            [{"OFFENSE_CODE_GROUP": "Others", "count": others_count}]
+        )
+        pie_data = pd.concat([top10, others_row], ignore_index=True)
+    else:
+        pie_data = top10
+
+    pie_chart = (
+        alt.Chart(pie_data)
+        .mark_arc()
+        .encode(
+            theta="count:Q",
+            color=alt.Color(
+                "OFFENSE_CODE_GROUP:N",
+                legend=alt.Legend(title="Offense Group"),
+            ),
+            tooltip=["OFFENSE_CODE_GROUP:N", "count:Q"],
+        )
+        .properties(width=400, height=400)
     )
-    .properties(width=400, height=400)
-)
 
-st.altair_chart(pie_chart, use_container_width=True)
+    st.altair_chart(pie_chart, use_container_width=True)
 
 # -----------------------------------------------------------
 # 4) Incident map – centered on Boston, district-colored
