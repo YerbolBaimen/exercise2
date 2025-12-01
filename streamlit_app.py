@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pydeck as pdk
-import matplotlib.pyplot as plt
+import altair as alt
 
 # -----------------------------------------------------------
 # Page setup
@@ -105,7 +105,7 @@ if filtered.empty:
     st.stop()
 
 # -----------------------------------------------------------
-# KPI headline cards only (no summary text line)
+# KPI metric cards (no headline summary text line)
 # -----------------------------------------------------------
 total_offenses = len(filtered)
 ucr_part_one = filtered.loc[filtered["UCR_PART"] == "Part One"]
@@ -154,7 +154,7 @@ dist_counts = dist_counts.sort_index()
 st.bar_chart(dist_counts)
 
 # -----------------------------------------------------------
-# 3) Offense groups – PIE CHART (top 10 + Others, sorted) using matplotlib
+# 3) Offense groups – PIE CHART (top 10 + Others) with Altair
 # -----------------------------------------------------------
 st.subheader("🔍 Offense Groups (Top 10 + Others)")
 
@@ -169,7 +169,7 @@ offense_counts_full = (
 if offense_counts_full.empty:
     st.info("No offense data available for the selected filters.")
 else:
-    # top 10
+    # Top 10
     top10 = offense_counts_full.head(10).copy()
     top10_total = top10["count"].sum()
     overall_total = offense_counts_full["count"].sum()
@@ -183,20 +183,23 @@ else:
     else:
         pie_data = top10
 
-    # sort by count descending
+    # Ensure string labels and sort by count
+    pie_data["OFFENSE_CODE_GROUP"] = pie_data["OFFENSE_CODE_GROUP"].astype(str)
     pie_data = pie_data.sort_values("count", ascending=False)
 
-    # Matplotlib pie chart
-    fig, ax = plt.subplots()
-    ax.pie(
-        pie_data["count"],
-        labels=pie_data["OFFENSE_CODE_GROUP"],
-        autopct="%1.1f%%",
-        startangle=90,
+    pie_chart = (
+        alt.Chart(pie_data)
+        .mark_arc()
+        .encode(
+            theta=alt.Theta(field="count", type="quantitative"),
+            color=alt.Color(field="OFFENSE_CODE_GROUP", type="nominal",
+                            legend=alt.Legend(title="Offense Group")),
+            tooltip=["OFFENSE_CODE_GROUP", "count"],
+        )
+        .properties(width=400, height=400)
     )
-    ax.axis("equal")  # Equal aspect ratio ensures the pie is drawn as a circle.
 
-    st.pyplot(fig)
+    st.altair_chart(pie_chart, use_container_width=True)
 
 # -----------------------------------------------------------
 # 4) Incident map – centered on Boston, district-colored
