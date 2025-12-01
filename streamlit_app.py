@@ -89,14 +89,12 @@ if ucr_filter == "Part One only":
     mask &= df["UCR_PART"] == "Part One"
 elif ucr_filter == "Part Two only":
     mask &= df["UCR_PART"] == "Part Two"
-# "All" -> no extra mask
 
 # Shooting mask
 if shooting_filter == "Shooting only":
     mask &= df["SHOOTING"].notna() & (df["SHOOTING"] != "")
 elif shooting_filter == "Non-shooting only":
     mask &= df["SHOOTING"].isna() | (df["SHOOTING"] == "")
-# "All" -> no extra mask
 
 filtered = df.loc[mask].copy()
 
@@ -107,13 +105,24 @@ if filtered.empty:
     st.stop()
 
 # -----------------------------------------------------------
-# KPIs
+# KPI headline
 # -----------------------------------------------------------
+total_offenses = len(filtered)
 ucr_part_one = filtered.loc[filtered["UCR_PART"] == "Part One"]
 ucr_part_two = filtered.loc[filtered["UCR_PART"] == "Part Two"]
 shootings = filtered.loc[filtered["SHOOTING"].notna() & (filtered["SHOOTING"] != "")]
 
-c1, c2, c3 = st.columns(3)
+# Headline text with totals
+st.markdown(
+    f"### Summary for selected filters: "
+    f"Total offenses **{total_offenses:,}**, "
+    f"Part One **{len(ucr_part_one):,}**, "
+    f"Part Two **{len(ucr_part_two):,}**"
+)
+
+# Metric cards row
+c0, c1, c2, c3 = st.columns(4)
+c0.metric("Total Offenses", total_offenses)
 c1.metric("UCR Part One Offenses", len(ucr_part_one))
 c2.metric("UCR Part Two Offenses", len(ucr_part_two))
 c3.metric("Shooting Incidents", len(shootings))
@@ -137,7 +146,7 @@ daily_counts["rolling_7d"] = daily_counts["count"].rolling(window=7, min_periods
 st.line_chart(daily_counts)
 
 # -----------------------------------------------------------
-# 2) Crimes by district – bar chart
+# 2) Crimes by district – bar chart (alphabetical order)
 # -----------------------------------------------------------
 st.subheader("🏙️ Crimes by District")
 
@@ -145,16 +154,18 @@ dist_counts = (
     filtered
     .groupby("DISTRICT")
     .size()
-    .sort_values(ascending=False)
     .to_frame(name="Count")
 )
+
+# Sort districts alphabetically by index
+dist_counts = dist_counts.sort_index()
 
 st.bar_chart(dist_counts)
 
 # -----------------------------------------------------------
-# 3) Top offense groups – PIE CHART (top 10 + Others)
+# 3) Offense groups – PIE CHART (top 10 + Others, sorted)
 # -----------------------------------------------------------
-st.subheader("🔟 Offense Groups (Top 10 + Others)")
+st.subheader("🔍 Offense Groups (Top 10 + Others)")
 
 offense_counts_full = (
     filtered
@@ -181,6 +192,9 @@ else:
     else:
         pie_data = top10
 
+    # sort pie segments by count (descending) for nicer legend/order
+    pie_data = pie_data.sort_values("count", ascending=False)
+
     pie_chart = (
         alt.Chart(pie_data)
         .mark_arc()
@@ -188,8 +202,10 @@ else:
             theta="count:Q",
             color=alt.Color(
                 "OFFENSE_CODE_GROUP:N",
+                sort="-y",  # sort legend by count descending
                 legend=alt.Legend(title="Offense Group"),
             ),
+            order=alt.Order("count:Q", sort="descending"),
             tooltip=["OFFENSE_CODE_GROUP:N", "count:Q"],
         )
         .properties(width=400, height=400)
