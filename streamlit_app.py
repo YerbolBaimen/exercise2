@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import altair as alt
 import pydeck as pdk
+import matplotlib.pyplot as plt
 
 # -----------------------------------------------------------
 # Page setup
@@ -105,22 +105,13 @@ if filtered.empty:
     st.stop()
 
 # -----------------------------------------------------------
-# KPI headline
+# KPI headline cards only (no summary text line)
 # -----------------------------------------------------------
 total_offenses = len(filtered)
 ucr_part_one = filtered.loc[filtered["UCR_PART"] == "Part One"]
 ucr_part_two = filtered.loc[filtered["UCR_PART"] == "Part Two"]
 shootings = filtered.loc[filtered["SHOOTING"].notna() & (filtered["SHOOTING"] != "")]
 
-# Headline text with totals
-st.markdown(
-    f"### Summary for selected filters: "
-    f"Total offenses **{total_offenses:,}**, "
-    f"Part One **{len(ucr_part_one):,}**, "
-    f"Part Two **{len(ucr_part_two):,}**"
-)
-
-# Metric cards row
 c0, c1, c2, c3 = st.columns(4)
 c0.metric("Total Offenses", total_offenses)
 c1.metric("UCR Part One Offenses", len(ucr_part_one))
@@ -163,7 +154,7 @@ dist_counts = dist_counts.sort_index()
 st.bar_chart(dist_counts)
 
 # -----------------------------------------------------------
-# 3) Offense groups – PIE CHART (top 10 + Others, sorted)
+# 3) Offense groups – PIE CHART (top 10 + Others, sorted) using matplotlib
 # -----------------------------------------------------------
 st.subheader("🔍 Offense Groups (Top 10 + Others)")
 
@@ -192,26 +183,20 @@ else:
     else:
         pie_data = top10
 
-    # sort pie segments by count (descending) for nicer legend/order
+    # sort by count descending
     pie_data = pie_data.sort_values("count", ascending=False)
 
-    pie_chart = (
-        alt.Chart(pie_data)
-        .mark_arc()
-        .encode(
-            theta="count:Q",
-            color=alt.Color(
-                "OFFENSE_CODE_GROUP:N",
-                sort="-y",  # sort legend by count descending
-                legend=alt.Legend(title="Offense Group"),
-            ),
-            order=alt.Order("count:Q", sort="descending"),
-            tooltip=["OFFENSE_CODE_GROUP:N", "count:Q"],
-        )
-        .properties(width=400, height=400)
+    # Matplotlib pie chart
+    fig, ax = plt.subplots()
+    ax.pie(
+        pie_data["count"],
+        labels=pie_data["OFFENSE_CODE_GROUP"],
+        autopct="%1.1f%%",
+        startangle=90,
     )
+    ax.axis("equal")  # Equal aspect ratio ensures the pie is drawn as a circle.
 
-    st.altair_chart(pie_chart, use_container_width=True)
+    st.pyplot(fig)
 
 # -----------------------------------------------------------
 # 4) Incident map – centered on Boston, district-colored
