@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import altair as alt
+import pydeck as pdk
 
 # -----------------------------------------------------------
 # Page setup
@@ -19,7 +21,7 @@ st.markdown("Upload **Boston crime data CSV** to generate insights, KPIs, and di
 # -----------------------------------------------------------
 st.sidebar.header("📊 Controls")
 
-uploaded_file = st.sidebar.file_uploader("Upload Boston Crimses CSV", type=["csv"])
+uploaded_file = st.sidebar.file_uploader("Upload Boston Crimes CSV", type=["csv"])
 
 @st.cache_data
 def load_data(file):
@@ -39,15 +41,31 @@ df = load_data(uploaded_file)
 min_date = df["OCCURRED_ON_DATE"].dt.date.min()
 max_date = df["OCCURRED_ON_DATE"].dt.date.max()
 
-date_range = st.sidebar.date_input("Select date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+date_range = st.sidebar.date_input(
+    "Select date range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date,
+)
 
-start_date, end_date = date_range
+# handle single-date selection
+if isinstance(date_range, tuple):
+    start_date, end_date = date_range
+else:
+    start_date = end_date = date_range
 
 districts = sorted(df["DISTRICT"].dropna().unique().tolist())
-selected_districts = st.sidebar.multiselect("Filter by district", options=districts, default=districts)
+selected_districts = st.sidebar.multiselect(
+    "Filter by district",
+    options=districts,
+    default=districts,
+)
 
-mask = (df["OCCURRED_ON_DATE"].dt.date >= start_date) & (df["OCCURRED_ON_DATE"].dt.date <= end_date)
-mask &= df["DISTRICT"].isin(selected_districts)
+mask = (df["OCCURRED_ON_DATE"].dt.date >= start_date) & \
+       (df["OCCURRED_ON_DATE"].dt.date <= end_date)
+
+if selected_districts:
+    mask &= df["DISTRICT"].isin(selected_districts)
 
 filtered = df.loc[mask].copy()
 
@@ -76,34 +94,128 @@ st.markdown("---")
 # -----------------------------------------------------------
 st.subheader("📈 Daily Crime Volume (7-Day Rolling Average)")
 
-daily_counts = filtered.set_index("OCCURRED_ON_DATE").resample("D").size().to_frame(name="count")
+daily_counts = (
+    filtered
+    .set_index("OCCURRED_ON_DATE")
+    .resample("D")
+    .size()
+    .to_frame(name="count")
+)
 daily_counts["rolling_7d"] = daily_counts["count"].rolling(window=7, min_periods=1).mean()
 
 st.line_chart(daily_counts)
 
 # -----------------------------------------------------------
-# 2) Crimes by district
+# 2) Crimes by district – bar chart
 # -----------------------------------------------------------
 st.subheader("🏙️ Crimes by District")
 
-dist_counts = filtered.groupby("DISTRICT").size().sort_values(ascending=False)
+dist_counts = (
+    filtered
+    .groupby("DISTRICT")
+    .size()
+    .sort_values(ascending=False)
+    .to_frame(name="Count")
+)
+
 st.bar_chart(dist_counts)
 
 # -----------------------------------------------------------
-# 3) Top 10 offense categories pie-style
+# 3) Top 10 offense groups – PIE CHART (Altair)
 # -----------------------------------------------------------
-st.subheader("🔟 Top 10 Offense Groups")
+st.subheader("🔟 Top 10 Offense Groups (Pie Chart)")
 
-offense_counts = filtered.groupby("OFFENSE_CODE_GROUP").size().to_frame(name="count").sort_values("count", ascending=False).head(10)
-st.bar_chart(offense_counts["count"])
+offense_counts = (
+    filtered
+    .groupby("OFFENSE_CODE_GROUP")
+    .size()
+    .reset_index(name="count")
+    .sort_values("count", ascending=False)
+    .head(10)
+)
+
+pie_chart = (
+    alt.Chart(offense_counts)
+    .mark_arc()
+    .encode(
+        theta="count:Q",
+        color=alt.Color("OFFENSE_CODE_GROUP:N", legend=alt.Legend(title="Offense Group")),
+        tooltip=["OFFENSE_CODE_GROUP:N", "count:Q"]
+    )
+    .properties(width=400, height=400)
+)
+
+st.altair_chart(pie_chart, use_container_width=True)
 
 # -----------------------------------------------------------
-# 4) Incident map (sample for performance)
+# 4) Incident map – centered on Boston, district-colored
 # -----------------------------------------------------------
-st.subheader("🗺 Location of Crime Incidents (sample)")
+st.subheader("🗺 Location of Crime Incidents (colored by district)")
 
-geo = filtered.dropna(subset=["Lat", "Long"])
+geo = filtered.dropna(subset=["Lat", "Long"]).copy()
+
+# sample for performance
 if len(geo) > 4000:
     geo = geo.sample(4000, random_state=42)
 
-st.map(geo.rename(columns={"Lat": "lat", "Long": "lon"}))
+if geo.empty:
+    st.info("No geocoded incidents available for the selected filters.")
+else:
+    # build a color map for districts
+    unique_districts = sorted(geo["DISTRICT"].dropna().unique())
+    color_palette = [
+        [230, 25, 75],   # red
+        [60, 180, 75],   # green
+        [0, 130, 200],   # blue
+        [245, 130, 48],  # orange
+        [145, 30, 180],  # purple
+        [70, 240, 240],  # cyan
+        [240, 50, 230],  # magenta
+        [210, 245, 60],  # lime
+        [250, 190, 190], # pink
+        [0, 128, 128],   # teal
+        [170, 110, 40],  # brown
+        [128, 128, 0],   # olive
+        [0, 0, 128],     # navy
+    ]
+    color_map = {
+        d: color_palette[i % len(color_palette)]
+        for i, d in enumerate(unique_districts)
+    }
+
+    # assign colors (fallback gray for NaN)
+    geo["color"] = geo["DISTRICT"].map(color_map)
+    geo["color"] = geo["color"].apply(
+        lambda c: c if isinstance(c, list) else [200, 200, 200]
+    )
+
+    layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=geo,
+        get_position=["Long", "Lat"],
+        get_radius=40,
+        get_fill_color="color",
+        pickable=True,
+        auto_highlight=True,
+    )
+
+    # Centered on Boston
+    view_state = pdk.ViewState(
+        latitude=42.3601,
+        longitude=-71.0589,
+        zoom=11,
+        pitch=0,
+        bearing=0,
+    )
+
+    tooltip = {
+        "text": "District: {DISTRICT}\nOffense: {OFFENSE_CODE_GROUP}\nDate: {OCCURRED_ON_DATE}"
+    }
+
+    deck = pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        tooltip=tooltip,
+    )
+
+    st.pydeck_chart(deck, use_container_width=True)
